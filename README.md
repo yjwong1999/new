@@ -4,16 +4,16 @@ Efficient YOLOv8 inference depends not only on GPU specifications but also on CP
 
 ## Setup
 Conda environment
-```
+```bash
 conda create --name yolo python=3.8.10 -y
 conda activate yolo
 
-git clone https://github.com/yjwong1999/efficient_yolov8_inference.git
-cd efficient_yolov8_inference
+git clone https://github.com/yjwong1999/new.git
+cd new
 ```
 
 Install dependencies
-```
+```bash
 pip3 install torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1 --index-url https://download.pytorch.org/whl/cu118
 pip install ultralytics==8.1.24
 pip install pip install pafy==0.5.5
@@ -21,7 +21,7 @@ pip install youtube-dl==2021.12.17
 ```
 
 ## Find port number connected to camera
-```
+```bash
 python3 find_port.py
 ```
 
@@ -32,13 +32,13 @@ python3 find_port.py
 ```
 
 ## Install VLC player to simulate rtsp streaming
-```
+```bash
 sudo snap install vlc
 ```
 
 ## Detection
 Single stream detection
-```
+```bash
 python3 single_detect.py --webcam
 python3 single_detect.py --camera 0
 python3 single_detect.py --video-file sample_video.mp4
@@ -47,13 +47,13 @@ python3 single_detect.py --youtube "http://www.youtube.com/watch?v=q0kPBRIPm6o"
 ```
 
 Multi stream detection
-```
+```bash
 python3 multi_detect.py
 ```
 
 ## Tracking
 Single stream tracking
-```
+```bash
 # Example (without geofencing)
 python3 single_track.py --webcam
 python3 single_track.py --camera 0
@@ -66,7 +66,7 @@ python3 single_track.py -video-file sample_video.mp4 --roi-xyxy 0.6,0.4,0.9,0.8
 ```
 
 Multi stream tracking
-```
+```bash
 # without geofencing
 python3 multi_track.py
 
