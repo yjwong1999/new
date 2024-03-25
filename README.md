@@ -27,6 +27,11 @@ pip install regex==2023.6.3
 pip install filterpy==1.4.5
 pip install lapx==0.5.4
 pip install onnxruntime-gpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
+pip install onnx
+
+pip3 install google-api-python-client==2.111.0
+pip3 install gspread==5.12.2
+pip3 install oauth2client==4.1.3
 ```
 
 ## Find port number connected to camera
