@@ -5,8 +5,8 @@ Efficient YOLOv8 inference depends not only on GPU specifications but also on CP
 ## Setup
 Conda environment
 ```bash
-conda create --name yolo python=3.8.10 -y
-conda activate yolo
+conda create --name new python=3.8.10 -y
+conda activate new
 
 git clone https://github.com/yjwong1999/new.git
 cd new
@@ -18,6 +18,15 @@ pip3 install torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1 --index-url http
 pip install ultralytics==8.1.24
 pip install pip install pafy==0.5.5
 pip install youtube-dl==2021.12.17
+
+pip install scikit-learn==1.3.2
+pip install loguru==0.7.2
+pip install gdown==4.6.1
+pip install ftfy==6.1.1
+pip install regex==2023.6.3
+pip install filterpy==1.4.5
+pip install lapx==0.5.4
+pip install optimum[onnxruntime-gpu]==1.16
 ```
 
 ## Find port number connected to camera
