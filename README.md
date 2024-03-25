@@ -14,7 +14,7 @@ cd new
 
 Install dependencies
 ```bash
-pip3 install torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1 --index-url https://download.pytorch.org/whl/cu118
+pip3 install torch torchvision torchaudio
 pip install ultralytics==8.1.24
 pip install pip install pafy==0.5.5
 pip install youtube-dl==2021.12.17
@@ -26,7 +26,6 @@ pip install ftfy==6.1.1
 pip install regex==2023.6.3
 pip install filterpy==1.4.5
 pip install lapx==0.5.4
-pip install optimum[onnxruntime-gpu]==1.16
 pip install onnxruntime-gpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
 ```
 
