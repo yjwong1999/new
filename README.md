@@ -27,6 +27,7 @@ pip install regex==2023.6.3
 pip install filterpy==1.4.5
 pip install lapx==0.5.4
 pip install optimum[onnxruntime-gpu]==1.16
+pip install onnxruntime-gpu --extra-index-url https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/
 ```
 
 ## Find port number connected to camera
