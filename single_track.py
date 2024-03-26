@@ -184,7 +184,7 @@ def reid(xyxys, img):
    # pair-wise scores
    #scores = torch.sum(chosen_model.database * feats, dim=1).tolist()
    cosine_sim = torch.mm(chosen_model.database, feats.transpose(0, 1))
-   print(cosine_sim)
+   #print(cosine_sim)
 
 
 # predict
