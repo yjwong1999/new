@@ -12,6 +12,9 @@ from pathlib import Path
 import argparse
 import torch
 import torch.nn.functional as F
+from filelock import FileLock
+import pickle
+import time, os
 
 from counter import Counter
 from boxmot.appearance.reid_multibackend import ReIDDetectMultiBackend
@@ -41,7 +44,7 @@ YOUTUBE = opt.youtube # need ssl to be set
 ROI_XYXY   = opt.roi_xyxy
 STREAM_IDX = opt.stream_idx
 SAVE       = False
-THRESH     = 0.5
+THRESH     = 0.6
 
 #------------------------------------------------------------------------------------------------------
 # Video streaming
@@ -66,8 +69,8 @@ else:
 # resize your input video frame size (smaller -> faster, but less accurate)
 frame_width = int(cap.get(3))
 frame_height = int(cap.get(4))
-resize_width = 1280   # Adjust based on your needs
-resize_height = 720  # Adjust based on your needs
+resize_width = 640   # Adjust based on your needs
+resize_height = 480  # Adjust based on your needs
 if frame_width > 0:
     resize_height = int((resize_width / frame_width) * frame_height)
 
@@ -207,56 +210,192 @@ def plot(
 class ReIDManager:
     def __init__(self):
         self.feat_database = None
+        self.corresponding_id = []
+        
         self.total_unique_id = 0
         self.unique_track_ids = [-1] * 300
+        
         self.track_to_match_id = {}
+        self.track_alive = {}
+        self.alive_thresh = 5
+        self.all_track_and_corr_id = {}
+        
+        self.blur_ids = []
+        self.prev_id = []
+        
+        # temp variable
+        temp = []
+        
+        #---------------------------------
+        # load database
+        #---------------------------------            
+        if int(STREAM_IDX) == 0:
+            # if got previous embedding database
+            loaded_data = []
+            for npy_file_path in ["3_combined.npy", "4_combined.npy"]:
+                temp = np.load(npy_file_path)
+                loaded_data.append(temp)
+            loaded_data = np.concatenate(loaded_data, axis=0)
+            self.feat_database = torch.tensor(loaded_data)
+            
+            # store the unblur ids for future reference
+            self.blur_ids = [i for i in range(len(loaded_data))]
+            self.total_unique_id = len(self.blur_ids)
+            self.corresponding_id = [-999 for i in range(len(self.blur_ids))]
+            
+            # group as one list called shared_data
+            shared_data = [self.feat_database, self.blur_ids, self.total_unique_id, self.corresponding_id]
+            
+            # save the shared_data as pickle, with filelock
+            lock = FileLock("file.lock")
+            with lock:
+                with open('shared_data.pkl', 'wb') as outp:
+                    pickle.dump(shared_data, outp, pickle.HIGHEST_PROTOCOL)
+                    
+            time.sleep(5) # wait other streams
+                    
+        else:
+            # load the shared_data, with filelock
+            time.sleep(5) # wait main stream to load everything
+            lock = FileLock("file.lock")
+            with lock:                
+                with open('shared_data.pkl', 'rb') as inp:
+                    shared_data = pickle.load(inp)
+                    self.feat_database, self.blur_ids, self.total_unique_id, self.corresponding_id = shared_data
+            
+        print(self.feat_database.shape, len(self.corresponding_id))
+            
         
     def matching(self, track_ids, xyxys, img):
-        # ReID model inference
-        feats = chosen_model.reid.get_features(xyxys.numpy(), img)
+        # do everything in the filelock period
+        lock = FileLock("file.lock")
+        with lock:
+            # load shared_data
+            with open('shared_data.pkl', 'rb') as inp:
+                shared_data = pickle.load(inp)
+                self.feat_database, self.blur_ids, self.total_unique_id, self.corresponding_id = shared_data        
 
-        # normalize feats
-        feats = torch.from_numpy(feats)
-        feats = F.normalize(feats, dim=1)
+            # ReID model inference
+            temp = xyxys.numpy()
+            widths = (temp[:,2] - temp[:,0]).reshape(-1)
+            
+            feats = chosen_model.reid.get_features(xyxys.numpy(), img)
 
-        # init
-        if self.feat_database is None:
-            self.feat_database = feats
-            for track_id in track_ids:
-                self.total_unique_id += 1
-                self.unique_track_ids.append(track_id)
-                self.track_to_match_id[track_id] = self.total_unique_id
-            return
+            # normalize feats
+            feats = torch.from_numpy(feats)
+            feats = F.normalize(feats, dim=1)
 
-        # cosine similarity scores, and matches
-        cosine_sim = torch.mm(self.feat_database, feats.transpose(0, 1))
-        match_ids        = torch.argmax(cosine_sim, dim=0).cpu().tolist()
-        match_thresholds = torch.any(cosine_sim > THRESH, dim=0).cpu().tolist()
+            # init
+            if self.feat_database is None:
+                raise NotImplementedError
+                self.feat_database = feats
+                for track_id in track_ids:
+                    self.total_unique_id += 1
+                    self.unique_track_ids.append(track_id)
+                    CORRESPONDING_ID = self.total_unique_id
+                    self.track_to_match_id[track_id] = CORRESPONDING_ID + 1
+                    self.corresponding_id.append(CORRESPONDING_ID)
+                return
+
+            # cosine similarity scores, and matches
+            '''
+            Given that:
+                self.feat_database is a M x 512 matrix
+                self.feats is a N x 512 matrix
+            
+            M is the number of identities stored in database
+            N is the number of detected faces in this frame
+            
+            Face matching is to perform a nested for loop of matching
+            all M and N, which is M x N possibilities
+            
+            Instead of double for loop, we can do matrix multiplication:
+                (M x 512) multiply with (512 x N)
+            This will gives us M x N, which is all of the matching possibilities
+            '''        
+            cosine_sim = torch.mm(self.feat_database, feats.transpose(0, 1))
+            match_ids        = torch.argmax(cosine_sim, dim=0).cpu().tolist()
+            match_thresholds = torch.any(cosine_sim > THRESH, dim=0).cpu().tolist()
+            
+            #print(match_ids, match_thresholds)
+            reid_dict = {}
+            for idx, (track_id, match_id, match_threshold, width) in enumerate(zip(track_ids, match_ids, match_thresholds, widths)):
+                #print(idx, match_id, match_threshold)
+
+                # if width < 20, skip
+                if width < 20:
+                    reid_dict[track_id] = -999
+                    continue
+                
+                # init RECORD_TO_DATABASE
+                RECORD_TO_DATABASE = True
+                
+                # init track_alive count if not exist
+                try:
+                    self.track_alive[track_id] # prompt if this works
+                except:
+                    self.track_alive[track_id] = 0                
+                
+                # skip this track_id, if it has been recorded
+                if track_id in self.unique_track_ids:
+                    reid_dict[track_id] = self.track_to_match_id[track_id]
+                    continue           
+
+                # if track_alive < alive_thresh
+                if self.track_alive[track_id] < self.alive_thresh:
+                    RECORD_TO_DATABASE = True                
+                
+                # if match, then use the match_id
+                if match_threshold and (match_id not in self.prev_id):
+                    # check if is blur id
+                    if match_id in self.blur_ids:
+                        reid_dict[track_id] = -999
+                        self.track_to_match_id[track_id] = -999
+                        RECORD_TO_DATABASE = False
+                    else:
+                        CORRESPONDING_ID = self.corresponding_id[match_id]
+                        reid_dict[track_id] = CORRESPONDING_ID
+                        self.track_to_match_id[track_id] = CORRESPONDING_ID
+                        RECORD_TO_DATABASE = True                    
+                else:
+                    try:
+                        CORRESPONDING_ID = self.all_track_and_corr_id[track_id]
+                    except:
+                        self.total_unique_id += 1
+                        CORRESPONDING_ID = self.total_unique_id
+                        self.all_track_and_corr_id[track_id] = CORRESPONDING_ID
+                    reid_dict[track_id] = CORRESPONDING_ID                
+                    self.track_to_match_id[track_id] = CORRESPONDING_ID
+                    RECORD_TO_DATABASE = True
+                    
+                # record to database
+                if RECORD_TO_DATABASE:
+                    self.feat_database = torch.cat((self.feat_database, feats[idx].unsqueeze(0)), axis=0)
+                    self.corresponding_id.append(CORRESPONDING_ID)
+                    #print(self.feat_database.shape)
+                    
+                    y = self.feat_database.numpy()
+                    #np.save(f"{STREAM_IDX}_z.npy", y)                 
+                    #should save corresponding id also
+                    
+                # update track_alive count if not blur
+                if match_id not in self.blur_ids:
+                    self.track_alive[track_id] += 1
+                    
+                # register track_id only if track_alive >= alive_thresh
+                if self.track_alive[track_id] >= self.alive_thresh:
+                    self.unique_track_ids.append(track_id)
+                    self.unique_track_ids.pop(0)                  
+                
+            # replace previous frame ID
+            self.prev_id = list(reid_dict.values())
+            
+            # group as one list called shared_data
+            shared_data = [self.feat_database, self.blur_ids, self.total_unique_id, self.corresponding_id]
+            with open('shared_data.pkl', 'wb') as outp:
+                pickle.dump(shared_data, outp, pickle.HIGHEST_PROTOCOL)            
         
-        #print(match_ids, match_thresholds)
-        reid_dict = {}
-        for idx, (track_id, match_id, match_threshold) in enumerate(zip(track_ids, match_ids, match_thresholds)):
-            #print(idx, match_id, match_threshold)
-            
-            # skip this track_id, if it has been recorded
-            if track_id in self.unique_track_ids:
-                reid_dict[track_id] = self.track_to_match_id[track_id]
-                continue
-            
-            # register track_id
-            self.unique_track_ids.append(track_id)
-            self.unique_track_ids.pop(0)            
-            
-            # if match, then use the match_id
-            if match_threshold:
-                reid_dict[track_id] = match_id + 1
-                self.track_to_match_id[track_id] = match_id + 1
-            else:
-                self.total_unique_id += 1
-                reid_dict[track_id] = self.total_unique_id
-                self.feat_database = torch.cat((self.feat_database, feats[idx].unsqueeze(0)), axis=0)
-                self.track_to_match_id[track_id] = self.total_unique_id
-                #print(self.feat_database.shape)
+        #time.sleep(0.001)
         return reid_dict
             
 
@@ -274,7 +413,7 @@ def get_model(opt):
     chosen_model = ultralytics.YOLO("yolov8n_face.pt")  # Adjust model version as needed
 
     # Load the ReID model
-    chosen_model.reid = ReIDDetectMultiBackend(weights=Path("custom_backbone_10000.onnx"), device=torch.device(0), fp16=True)
+    chosen_model.reid = ReIDDetectMultiBackend(weights=Path("backbone_10000.onnx"), device=torch.device(0), fp16=True)
 
     # ReID magager
     chosen_model.reid_manager = ReIDManager()
@@ -313,7 +452,7 @@ def draw_roi(chosen_model, img):
     # put text
     text = f'in: {chosen_model.my_counter.count_in}'
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = int(img.shape[0] * 0.002)
+    font_scale = int(img.shape[0] * 0.003)
     font_thickness = 2
     origin = (int(img.shape[0]*0.35), int(img.shape[1]*0.5))
     x, y = origin
@@ -343,6 +482,8 @@ def predict(chosen_model, img, classes=[], conf=0.5):
 
 # predict and detect
 def predict_and_detect(chosen_model, track_history, img, classes=[], conf=0.5):
+    #import time
+    #time.sleep(0.1)
     # resiz the image to 640x480
     img = cv2.resize(img, (resize_width, resize_height))
     img_shape = img.shape
