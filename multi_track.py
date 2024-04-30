@@ -1,6 +1,7 @@
 import threading
 import subprocess
 import argparse
+import os
 
 def run_command(command):
     """
@@ -12,6 +13,10 @@ def run_command(command):
         print(f"Error executing command: {e}")
 
 def main(opt):
+    # remove shared_data.pkl
+    if os.path.isfile('shared_data.pkl'):
+    	os.remove('shared_data.pkl')
+    	
     # read source.streams 
     with open("source.streams","r") as f:
         sources = f.readlines()
